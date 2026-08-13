@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - jellyfin-version: 10.10.0
+            framework: net8.0
+            dotnet-version: 8.0.x
+          - jellyfin-version: 12.0.0-rc3
+            framework: net10.0
+            dotnet-version: 10.0.x
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }}
+      - name: Restore
+        run: >-
+          dotnet restore
+          Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj
+          -p:JellyfinTargetFramework=${{ matrix.framework }}
+          -p:JellyfinVersion=${{ matrix.jellyfin-version }}
+      - name: Build
+        run: >-
+          dotnet build
+          Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj
+          --configuration Release --no-restore
+          -p:JellyfinTargetFramework=${{ matrix.framework }}
+          -p:JellyfinVersion=${{ matrix.jellyfin-version }}
+      - name: Upload plugin DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: continue-watching-deduplicator-enhanced-${{ matrix.jellyfin-version }}-${{ github.sha }}
+          path: Jellyfin.Plugin.ContinueWatchingDedupEnhanced/bin/Release/${{ matrix.framework }}/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.dll
+          if-no-files-found: error

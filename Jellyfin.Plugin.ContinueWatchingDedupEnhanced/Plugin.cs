@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
-using Jellyfin.Plugin.ContinueWatchingDedup.Configuration;
+using Jellyfin.Plugin.ContinueWatchingDedupEnhanced.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
-namespace Jellyfin.Plugin.ContinueWatchingDedup;
+namespace Jellyfin.Plugin.ContinueWatchingDedupEnhanced;
 
 /// <summary>
 /// Plugin entry point. Deduplicates the Continue Watching row so each series
@@ -20,13 +20,13 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         Instance = this;
     }
 
-    public override string Name => "Continue Watching Deduplicator";
+    public override string Name => "Continue Watching Deduplicator Enhanced";
 
-    public override Guid Id => Guid.Parse("c1a8f9b4-7e3d-4c2a-9f8e-3d4a5b6c7d8e");
+    public override Guid Id => Guid.Parse("58ee4cec-e3e2-4bbf-bf25-4f34e9e96fbc");
 
     public override string Description =>
-        "Removes duplicate episodes from the Continue Watching row, " +
-        "showing only the most recently played episode per series.";
+        "Deduplicates Continue Watching and optionally Up Next, " +
+        "including duplicates shared across both sections.";
 
     public static Plugin? Instance { get; private set; }
 
@@ -36,8 +36,10 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         {
             new PluginPageInfo
             {
-                Name = Name,
-                EmbeddedResourcePath = $"{GetType().Namespace}.Configuration.configPage.html"
+                Name = "ContinueWatchingDeduplicatorEnhanced",
+                DisplayName = Name,
+                EmbeddedResourcePath = $"{GetType().Namespace}.Configuration.configPage.html",
+                EnableInMainMenu = true
             }
         };
     }

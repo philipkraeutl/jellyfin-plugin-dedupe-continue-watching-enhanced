@@ -2,18 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Continue Watching Deduplicator</title>
+    <title>Continue Watching Deduplicator Enhanced</title>
 </head>
 <body>
-<div id="ContinueWatchingDedupConfigPage"
+<div id="ContinueWatchingDedupEnhancedConfigPage"
      data-role="page"
      class="page type-interior pluginConfigurationPage"
      data-require="emby-input,emby-button,emby-checkbox,emby-collapse">
 
     <div data-role="content">
         <div class="content-primary">
-            <form id="ContinueWatchingDedupConfigForm">
-                <h2>Continue Watching Deduplicator</h2>
+            <form id="ContinueWatchingDedupEnhancedConfigForm">
+                <h2>Continue Watching Deduplicator Enhanced</h2>
                 <p style="opacity:0.8;">
                     Removes duplicate episodes from the Continue Watching row.
                     Each series will appear once, represented by the most recently played episode.
@@ -72,7 +72,7 @@
 
     <script type="text/javascript">
         (function () {
-            var pluginUniqueId = "c1a8f9b4-7e3d-4c2a-9f8e-3d4a5b6c7d8e";
+            var pluginUniqueId = "58ee4cec-e3e2-4bbf-bf25-4f34e9e96fbc";
 
             function loadConfig(page) {
                 Dashboard.showLoadingMsg();
@@ -88,7 +88,7 @@
             function saveConfig(e) {
                 e.preventDefault();
                 Dashboard.showLoadingMsg();
-                var page = document.querySelector('#ContinueWatchingDedupConfigPage');
+                var page = document.querySelector('#ContinueWatchingDedupEnhancedConfigPage');
 
                 ApiClient.getPluginConfiguration(pluginUniqueId).then(function (config) {
                     config.Enabled = page.querySelector('#Enabled').checked;
@@ -103,12 +103,12 @@
                 return false;
             }
 
-            document.querySelector('#ContinueWatchingDedupConfigPage')
+            document.querySelector('#ContinueWatchingDedupEnhancedConfigPage')
                 .addEventListener('pageshow', function () {
                     loadConfig(this);
                 });
 
-            document.querySelector('#ContinueWatchingDedupConfigForm')
+            document.querySelector('#ContinueWatchingDedupEnhancedConfigForm')
                 .addEventListener('submit', saveConfig);
         })();
     </script>

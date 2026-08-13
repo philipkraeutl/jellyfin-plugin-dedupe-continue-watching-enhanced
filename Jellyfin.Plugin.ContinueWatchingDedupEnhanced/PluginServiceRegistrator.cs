@@ -1,4 +1,4 @@
-using Jellyfin.Plugin.ContinueWatchingDedup.Middleware;
+using Jellyfin.Plugin.ContinueWatchingDedupEnhanced.Middleware;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.AspNetCore.Builder;
@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Jellyfin.Plugin.ContinueWatchingDedup;
+namespace Jellyfin.Plugin.ContinueWatchingDedupEnhanced;
 
 /// <summary>
 /// Registers the deduplication middleware into the ASP.NET Core pipeline

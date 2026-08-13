@@ -1,9 +1,9 @@
-# Build script for Continue Watching Deduplicator plugin (Windows)
+# Build script for Continue Watching Deduplicator Enhanced (Windows)
 # Run with: .\build.ps1
 
 $ErrorActionPreference = "Stop"
 
-$PluginName = "Jellyfin.Plugin.ContinueWatchingDedup"
+$PluginName = "Jellyfin.Plugin.ContinueWatchingDedupEnhanced"
 $Version = "1.0.0.0"
 
 Write-Host "Building $PluginName v$Version..." -ForegroundColor Cyan
@@ -25,8 +25,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Package as zip
-$ZipPath = "dist\${PluginName}_${Version}.zip"
-Compress-Archive -Path "dist\$PluginName\*" -DestinationPath $ZipPath -Force
+$ZipPath = "dist\continuewatchingdedupenhanced_${Version}.zip"
+Compress-Archive -Path "dist\$PluginName\$PluginName.dll" -DestinationPath $ZipPath -Force
 
 Write-Host ""
 Write-Host "Build complete!" -ForegroundColor Green

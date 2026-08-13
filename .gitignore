@@ -7,3 +7,5 @@ artifacts/
 .vscode/
 *.suo
 *.zip
+.dotnet10/
+.dotnet-install.ps1

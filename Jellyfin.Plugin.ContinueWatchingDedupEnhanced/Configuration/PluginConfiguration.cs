@@ -1,6 +1,6 @@
 using MediaBrowser.Model.Plugins;
 
-namespace Jellyfin.Plugin.ContinueWatchingDedup.Configuration;
+namespace Jellyfin.Plugin.ContinueWatchingDedupEnhanced.Configuration;
 
 public class PluginConfiguration : BasePluginConfiguration
 {

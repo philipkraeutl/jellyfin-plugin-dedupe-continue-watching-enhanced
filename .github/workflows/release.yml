@@ -1,130 +1,147 @@
-name: Release
+name: Release plugin
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Four-part plugin version, for example 1.0.0.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
-  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
 
 jobs:
   release:
+    name: Build and release Jellyfin 10.10 and 12 variants
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Check out source
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Setup .NET
+      - name: Set up .NET 8 and 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
-      - name: Determine version
-        id: ver
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            VERSION="${VERSION}.0"
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Build
-        run: |
-          dotnet publish Jellyfin.Plugin.ContinueWatchingDedup/Jellyfin.Plugin.ContinueWatchingDedup.csproj \
-            -c Release \
-            -o dist \
-            -p:Version=${{ steps.ver.outputs.version }} \
-            -p:AssemblyVersion=${{ steps.ver.outputs.version }} \
-            -p:FileVersion=${{ steps.ver.outputs.version }}
-
-      - name: Package zip
-        id: pkg
-        run: |
-          VERSION="${{ steps.ver.outputs.version }}"
-          ZIP="continuewatchingdedup_${VERSION}.zip"
-          mkdir -p artifacts
-          cp dist/Jellyfin.Plugin.ContinueWatchingDedup.dll artifacts/
-          cp build.yaml artifacts/ 2>/dev/null || true
-          (cd artifacts && zip -r "../${ZIP}" .)
-          CHECKSUM=$(md5sum "${ZIP}" | awk '{print $1}')
-          echo "zip=${ZIP}" >> "$GITHUB_OUTPUT"
-          echo "checksum=${CHECKSUM}" >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          name: ${{ steps.ver.outputs.tag }}
-          generate_release_notes: true
-          files: ${{ steps.pkg.outputs.zip }}
-
-      - name: Stage manifest.json update against main
+      - name: Determine and validate release version
+        id: version
+        shell: pwsh
         env:
-          VERSION: ${{ steps.ver.outputs.version }}
-          TAG: ${{ steps.ver.outputs.tag }}
-          ZIP: ${{ steps.pkg.outputs.zip }}
-          CHECKSUM: ${{ steps.pkg.outputs.checksum }}
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
-          # Tag builds run in detached HEAD on the tag commit; switch to a local main
-          # tracking origin/main so the manifest update is computed against the latest
-          # main, not the tag tree. peter-evans/create-pull-request will branch from
-          # this checked-out HEAD and open a PR.
-          git fetch origin main
-          git checkout -B main origin/main
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+              $env:GITHUB_REF_NAME -replace '^v', ''
+          } else {
+              $env:DISPATCH_VERSION.Trim() -replace '^v', ''
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+              throw "Release version '$version' must contain four numeric parts."
+          }
+          $buildVersion = (Select-String -Path build.yaml -Pattern '^version:\s*"?([^"\s]+)"?\s*$').Matches.Groups[1].Value
+          [xml]$project = Get-Content Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj
+          $projectVersion = $project.SelectSingleNode('//PluginVersion').InnerText
+          if ($version -ne $buildVersion -or $version -ne $projectVersion) {
+              throw "Version mismatch: release=$version, build.yaml=$buildVersion, PluginVersion=$projectVersion"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
 
-          python3 - <<'PY'
-          import json, os
-          from datetime import datetime, timezone
-          path = "manifest.json"
-          with open(path) as f:
-              data = json.load(f)
-          entry = data[0]
-          entry.setdefault("versions", [])
-          version = os.environ["VERSION"]
-          tag = os.environ["TAG"]
-          zip_name = os.environ["ZIP"]
-          checksum = os.environ["CHECKSUM"]
-          repo = os.environ["GITHUB_REPOSITORY"]
-          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-          entry["versions"] = [v for v in entry["versions"] if v.get("version") != version]
-          entry["versions"].insert(0, {
-              "version": version,
-              "changelog": f"Release {tag}. See GitHub release notes.",
-              "targetAbi": "10.10.0.0",
-              "sourceUrl": f"https://github.com/{repo}/releases/download/{tag}/{zip_name}",
-              "checksum": checksum,
-              "timestamp": timestamp,
-          })
-          with open(path, "w") as f:
-              json.dump(data, f, indent=2)
-              f.write("\n")
-          PY
+      - name: Package Jellyfin 10.10 build
+        shell: pwsh
+        run: |
+          ./scripts/package.ps1 -Version "${{ steps.version.outputs.version }}" -Framework net8.0 -JellyfinVersion 10.10.0
 
-      - name: Open PR with manifest update
-        uses: peter-evans/create-pull-request@v6
+      - name: Package Jellyfin 12 preview build
+        shell: pwsh
+        run: |
+          ./scripts/package.ps1 -Version "${{ steps.version.outputs.version }}" -Framework net10.0 -JellyfinVersion 12.0.0-rc3 -PackageSuffix "-jellyfin12"
+
+      - name: Update both manifest entries
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $manifest = @(Get-Content manifest.json -Raw | ConvertFrom-Json)
+          $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $variants = @(
+            [ordered]@{
+              changelog = "Release for Jellyfin 10.10.x. See the GitHub release notes."
+              targetAbi = "10.10.0.0"
+              file = "continuewatchingdedupenhanced_$env:RELEASE_VERSION.zip"
+            },
+            [ordered]@{
+              changelog = "Preview build for Jellyfin 12.0 RC3. Test on non-production servers only."
+              targetAbi = "12.0"
+              file = "continuewatchingdedupenhanced-jellyfin12_$env:RELEASE_VERSION.zip"
+            }
+          )
+          $entries = foreach ($variant in $variants) {
+            $archive = "artifacts/$($variant.file)"
+            [ordered]@{
+              version = $env:RELEASE_VERSION
+              changelog = $variant.changelog
+              targetAbi = $variant.targetAbi
+              sourceUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$($variant.file)"
+              checksum = (Get-FileHash -Algorithm MD5 $archive).Hash.ToUpperInvariant()
+              timestamp = $timestamp
+            }
+          }
+          $abis = @("10.10.0.0", "12.0")
+          $older = @($manifest[0].versions | Where-Object { $_.version -ne $env:RELEASE_VERSION -or $_.targetAbi -notin $abis })
+          $manifest[0].versions = @($entries) + $older
+          ConvertTo-Json -InputObject $manifest -Depth 10 | Set-Content manifest.json -Encoding utf8
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
         with:
-          base: main
-          branch: ci/manifest-${{ steps.ver.outputs.tag }}
-          delete-branch: true
-          # Only stage manifest.json — never commit build artifacts (the
-          # dist/ and artifacts/ directories from earlier steps still sit
-          # in the working tree at this point).
-          add-paths: manifest.json
-          commit-message: "ci: update manifest for ${{ steps.ver.outputs.tag }}"
-          title: "ci: update manifest for ${{ steps.ver.outputs.tag }}"
-          body: |
-            Automated update from the release workflow for **${{ steps.ver.outputs.tag }}**.
+          name: continue-watching-deduplicator-enhanced-${{ steps.version.outputs.version }}
+          path: |
+            artifacts/*.zip
+            artifacts/*.zip.sha256
+            manifest.json
+          if-no-files-found: error
 
-            Adds version `${{ steps.ver.outputs.version }}` to `manifest.json` with
-            the MD5 checksum of the release zip and the GitHub release `sourceUrl`.
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            "artifacts/continuewatchingdedupenhanced_${RELEASE_VERSION}.zip" \
+            "artifacts/continuewatchingdedupenhanced_${RELEASE_VERSION}.zip.sha256" \
+            "artifacts/continuewatchingdedupenhanced-jellyfin12_${RELEASE_VERSION}.zip" \
+            "artifacts/continuewatchingdedupenhanced-jellyfin12_${RELEASE_VERSION}.zip.sha256" \
+            --target "$GITHUB_SHA" \
+            --title "Continue Watching Deduplicator Enhanced $RELEASE_VERSION" \
+            --generate-notes
 
-            Merge to publish the new version through the Jellyfin plugin repository feed.
-          labels: |
-            automated
-            release
+      - name: Publish updated manifest
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cp manifest.json "$RUNNER_TEMP/manifest.json"
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -B "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH"
+          cp "$RUNNER_TEMP/manifest.json" manifest.json
+          if ! git diff --quiet -- manifest.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add manifest.json
+            git commit -m "Update plugin manifest for v${RELEASE_VERSION}"
+            git push origin "HEAD:${DEFAULT_BRANCH}"
+          fi

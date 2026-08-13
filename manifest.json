@@ -1,29 +1,12 @@
 [
   {
-    "guid": "c1a8f9b4-7e3d-4c2a-9f8e-3d4a5b6c7d8e",
-    "name": "Continue Watching Deduplicator",
-    "description": "Server-side plugin that deduplicates the Continue Watching row. Each series appears once, represented by the most recently played episode. Works on every Jellyfin client.",
-    "overview": "Removes duplicate episodes from Continue Watching",
-    "owner": "SloMR",
+    "guid": "58ee4cec-e3e2-4bbf-bf25-4f34e9e96fbc",
+    "name": "Continue Watching Deduplicator Enhanced",
+    "description": "Deduplicates Continue Watching and optionally Up Next, including duplicate series shared across both sections.",
+    "overview": "Enhanced deduplication for Continue Watching and Up Next",
+    "owner": "philipkraeutl",
     "category": "General",
-    "imageUrl": "https://raw.githubusercontent.com/SloMR/jellyfin-plugin-dedupe-continue-watching/main/Jellyfin.Plugin.ContinueWatchingDedup/images/thumb.png",
-    "versions": [
-      {
-        "version": "1.0.1.0",
-        "changelog": "Release v1.0.1.0. See GitHub release notes.",
-        "targetAbi": "10.10.0.0",
-        "sourceUrl": "https://github.com/SloMR/jellyfin-plugin-dedupe-continue-watching/releases/download/v1.0.1.0/continuewatchingdedup_1.0.1.0.zip",
-        "checksum": "13459598bd5fd5ba2ebc63b9cd2041e4",
-        "timestamp": "2026-04-29T20:17:19Z"
-      },
-      {
-        "version": "1.0.0.0",
-        "changelog": "Release v1.0.0.0. See GitHub release notes.",
-        "targetAbi": "10.10.0.0",
-        "sourceUrl": "https://github.com/SloMR/jellyfin-plugin-dedupe-continue-watching/releases/download/v1.0.0.0/continuewatchingdedup_1.0.0.0.zip",
-        "checksum": "9dba07ea048f0504c5872c028525657f",
-        "timestamp": "2026-04-29T19:15:17Z"
-      }
-    ]
+    "imageUrl": "https://raw.githubusercontent.com/philipkraeutl/jellyfin-plugin-dedupe-continue-watching-enhanced/main/Jellyfin.Plugin.ContinueWatchingDedupEnhanced/images/thumb.png",
+    "versions": []
   }
 ]

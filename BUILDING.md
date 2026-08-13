@@ -1,188 +1,58 @@
-# Building the Plugin (All Platforms)
+# Building Continue Watching Deduplicator Enhanced
 
-The same `.dll` works on every Jellyfin server regardless of where you build it. Pick the OS you're most comfortable with.
-
----
-
-## Prerequisites (All OS)
-
-You need **.NET 8 SDK** installed.
-
-### Linux (Ubuntu/Debian)
-
-```bash
-sudo apt update
-sudo apt install -y dotnet-sdk-8.0
-```
-
-### Linux (Arch / Manjaro)
-
-```bash
-sudo pacman -S dotnet-sdk
-```
-
-### Linux (Fedora / RHEL)
-
-```bash
-sudo dnf install dotnet-sdk-8.0
-```
-
-### macOS
-
-**Option A — Homebrew (recommended):**
-```bash
-brew install dotnet@8
-```
-
-**Option B — Official installer:**
-Download from https://dotnet.microsoft.com/download/dotnet/8.0 — pick the macOS installer matching your CPU (Intel `x64` or Apple Silicon `arm64`).
-
-### Windows
-
-**Option A — winget:**
-```powershell
-winget install Microsoft.DotNet.SDK.8
-```
-
-**Option B — Official installer:**
-Download from https://dotnet.microsoft.com/download/dotnet/8.0 — pick "SDK" for x64.
-
-**Option C — Chocolatey:**
-```powershell
-choco install dotnet-8.0-sdk
-```
-
-Verify with:
-```bash
-dotnet --version
-```
-Should print `8.0.x`.
-
----
-
-## Building
-
-> **Just want to install it?** Don't build from source — grab the latest `.zip` from [Releases](https://github.com/SloMR/jellyfin-plugin-dedupe-continue-watching/releases) (built by CI on every tag) or add the plugin repository (see the [README](README.md#installation)). Build from source only if you're modifying the plugin or want to verify the artifact.
-
-### Linux / macOS
-
-```bash
-git clone https://github.com/SloMR/jellyfin-plugin-dedupe-continue-watching.git
-cd jellyfin-plugin-dedupe-continue-watching
-chmod +x build.sh
-./build.sh
-```
-
-### Windows (PowerShell)
+Install the .NET 8 SDK, then run one of the provided scripts:
 
 ```powershell
-git clone https://github.com/SloMR/jellyfin-plugin-dedupe-continue-watching.git
-cd jellyfin-plugin-dedupe-continue-watching
 .\build.ps1
 ```
 
-### Manual (Any OS)
+```bash
+./build.sh
+```
 
-If the scripts don't work:
+Or publish manually:
 
 ```bash
-cd jellyfin-plugin-dedupe-continue-watching
-dotnet publish Jellyfin.Plugin.ContinueWatchingDedup/Jellyfin.Plugin.ContinueWatchingDedup.csproj -c Release -o dist
+dotnet publish Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj -c Release -o dist
 ```
 
-The `.dll` will be at:
-```
-dist/Jellyfin.Plugin.ContinueWatchingDedup.dll
-```
+The plugin assembly is:
 
----
-
-## Installing on Your Jellyfin Server
-
-### Linux (native install)
-
-```bash
-sudo systemctl stop jellyfin
-sudo mkdir -p /var/lib/jellyfin/plugins/Jellyfin.Plugin.ContinueWatchingDedup_1.0.0.0
-sudo cp dist/Jellyfin.Plugin.ContinueWatchingDedup.dll \
-        /var/lib/jellyfin/plugins/Jellyfin.Plugin.ContinueWatchingDedup_1.0.0.0/
-sudo chown -R jellyfin:jellyfin /var/lib/jellyfin/plugins/
-sudo systemctl start jellyfin
+```text
+Jellyfin.Plugin.ContinueWatchingDedupEnhanced.dll
 ```
 
-### Linux (Docker)
+### Jellyfin 12 preview
 
-```bash
-docker stop jellyfin
-mkdir -p /your/jellyfin/config/plugins/Jellyfin.Plugin.ContinueWatchingDedup_1.0.0.0
-cp dist/Jellyfin.Plugin.ContinueWatchingDedup.dll \
-   /your/jellyfin/config/plugins/Jellyfin.Plugin.ContinueWatchingDedup_1.0.0.0/
-docker start jellyfin
-```
-
-### macOS
-
-```bash
-# Stop Jellyfin app
-osascript -e 'quit app "Jellyfin"'
-
-# Copy plugin
-mkdir -p ~/.local/share/jellyfin/plugins/Jellyfin.Plugin.ContinueWatchingDedup_1.0.0.0
-cp dist/Jellyfin.Plugin.ContinueWatchingDedup.dll \
-   ~/.local/share/jellyfin/plugins/Jellyfin.Plugin.ContinueWatchingDedup_1.0.0.0/
-
-# Restart Jellyfin
-open -a Jellyfin
-```
-
-### Windows
+The Jellyfin 12 variant requires the .NET 10 SDK and compiles against RC3:
 
 ```powershell
-# Stop service
-Stop-Service Jellyfin
-
-# Create plugin folder
-$pluginPath = "$env:ProgramData\Jellyfin\Server\plugins\Jellyfin.Plugin.ContinueWatchingDedup_1.0.0.0"
-New-Item -ItemType Directory -Force -Path $pluginPath
-
-# Copy DLL
-Copy-Item "dist\Jellyfin.Plugin.ContinueWatchingDedup\Jellyfin.Plugin.ContinueWatchingDedup.dll" `
-          -Destination $pluginPath
-
-# Start service
-Start-Service Jellyfin
+dotnet build Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj `
+  -c Release `
+  -p:JellyfinTargetFramework=net10.0 `
+  -p:JellyfinVersion=12.0.0-rc3
 ```
 
----
+## Manual installation
 
-## Verifying the Install
+1. Stop Jellyfin.
+2. Create a versioned plugin directory such as
+   `Continue Watching Deduplicator Enhanced_1.0.0.0` below Jellyfin's plugin directory.
+3. Copy `Jellyfin.Plugin.ContinueWatchingDedupEnhanced.dll` into it.
+4. Remove any older development copy with the same enhanced plugin GUID.
+5. Start Jellyfin.
 
-1. Open Jellyfin web UI
-2. Go to **Dashboard → Plugins → My Plugins**
-3. You should see **Continue Watching Deduplicator** listed
-4. Click it to access the settings page
-5. Open Continue Watching on any client — duplicates should be gone
+The original Continue Watching Deduplicator has a different GUID and assembly,
+so Jellyfin treats it as a separate plugin. Do not enable both simultaneously,
+because both intercept the same Continue Watching responses.
 
----
+## Release process
 
-## Troubleshooting
+1. Ensure the version in the project and `build.yaml` is correct.
+2. Push a four-part tag, for example `v1.0.0.0`.
+3. GitHub Actions builds `Jellyfin.Plugin.ContinueWatchingDedupEnhanced.dll`.
+4. The workflow creates `continuewatchingdedupenhanced_1.0.0.0.zip`.
+5. The workflow creates a GitHub release and opens a manifest-update pull request.
 
-### Plugin doesn't appear after restart
-
-- Check Jellyfin logs: `sudo tail -f /var/log/jellyfin/jellyfin$(date +%Y%m%d).log` (Linux native package) or `%ProgramData%\Jellyfin\Server\log\` (Windows). Docker users: `docker logs -f jellyfin`.
-- Look for lines mentioning `ContinueWatchingDedup` or plugin loading errors
-- Verify the folder is owned by the jellyfin user (`chown jellyfin:jellyfin`)
-
-### "Plugin failed to load"
-
-Usually means a `.NET` version mismatch. Make sure:
-- You built with .NET 8 SDK
-- Your Jellyfin server is version **10.10.0 or newer**
-
-### Build error: "Could not find package Jellyfin.Controller"
-
-Run:
-```bash
-dotnet restore
-```
-This downloads NuGet dependencies. Then rebuild.
+The initial `manifest.json` intentionally contains no release versions. The
+first release workflow run adds the first downloadable version and checksum.

@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.ContinueWatchingDedup.Middleware;
+namespace Jellyfin.Plugin.ContinueWatchingDedupEnhanced.Middleware;
 
 /// <summary>
 /// Intercepts Continue Watching responses and, when enabled, Up Next responses.
