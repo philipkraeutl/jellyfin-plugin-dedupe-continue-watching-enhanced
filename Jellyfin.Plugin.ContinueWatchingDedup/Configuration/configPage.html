@@ -31,6 +31,17 @@
 
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>
+                        <input is="emby-checkbox" type="checkbox" id="DeduplicateUpNext" />
+                        <span>Deduplicate Up Next</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Deduplicate the Up Next row and hide series already shown in Continue Watching.
+                        Disabled by default.
+                    </div>
+                </div>
+
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
                         <input is="emby-checkbox" type="checkbox" id="DeduplicateMovies" />
                         <span>Also deduplicate movies</span>
                     </label>
@@ -67,6 +78,7 @@
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginUniqueId).then(function (config) {
                     page.querySelector('#Enabled').checked = config.Enabled;
+                    page.querySelector('#DeduplicateUpNext').checked = config.DeduplicateUpNext === true;
                     page.querySelector('#DeduplicateMovies').checked = config.DeduplicateMovies;
                     page.querySelector('#MaxEpisodesPerSeries').value = config.MaxEpisodesPerSeries || 1;
                     Dashboard.hideLoadingMsg();
@@ -80,6 +92,7 @@
 
                 ApiClient.getPluginConfiguration(pluginUniqueId).then(function (config) {
                     config.Enabled = page.querySelector('#Enabled').checked;
+                    config.DeduplicateUpNext = page.querySelector('#DeduplicateUpNext').checked;
                     config.DeduplicateMovies = page.querySelector('#DeduplicateMovies').checked;
                     config.MaxEpisodesPerSeries = parseInt(page.querySelector('#MaxEpisodesPerSeries').value, 10) || 1;
 

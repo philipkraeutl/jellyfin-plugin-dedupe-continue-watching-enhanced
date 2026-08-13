@@ -11,6 +11,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool Enabled { get; set; } = true;
 
     /// <summary>
+    /// When true, Up Next is deduplicated and series already present in
+    /// Continue Watching are removed. Defaults to false to preserve the
+    /// plugin's existing behavior.
+    /// </summary>
+    public bool DeduplicateUpNext { get; set; } = false;
+
+    /// <summary>
     /// When true, movies are also deduplicated (only relevant if you have
     /// multiple versions of the same movie). Defaults to false because
     /// movies rarely benefit from this and it adds work.

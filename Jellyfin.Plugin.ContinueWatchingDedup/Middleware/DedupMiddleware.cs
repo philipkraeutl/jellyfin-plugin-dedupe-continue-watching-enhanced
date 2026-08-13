@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Collections.Concurrent;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
@@ -11,11 +13,15 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.ContinueWatchingDedup.Middleware;
 
 /// <summary>
-/// Intercepts responses to /Users/{userId}/Items/Resume and removes duplicate
-/// episodes belonging to the same series, keeping only the most recently played.
+/// Intercepts Continue Watching responses and, when enabled, Up Next responses.
+/// Removes duplicate episodes belonging to the same series, keeping only the
+/// most recently played.
 /// </summary>
 public class DedupMiddleware
 {
+    private static readonly ConcurrentDictionary<string, ContinueWatchingSnapshot> ContinueWatchingByUser =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan SeriesLifetime = TimeSpan.FromMinutes(1);
     private readonly RequestDelegate _next;
     private readonly ILogger<DedupMiddleware> _logger;
 
@@ -27,16 +33,15 @@ public class DedupMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        var requestStartedAt = DateTimeOffset.UtcNow;
         var path = context.Request.Path.Value ?? string.Empty;
 
-        if (!IsResumeEndpoint(path))
-        {
-            await _next(context);
-            return;
-        }
-
         var config = Plugin.Instance?.Configuration;
-        if (config is null || !config.Enabled)
+        var endpoint = GetEndpointKind(path);
+        if (config is null
+            || !config.Enabled
+            || endpoint == EndpointKind.None
+            || (endpoint == EndpointKind.UpNext && !config.DeduplicateUpNext))
         {
             await _next(context);
             return;
@@ -93,7 +98,20 @@ public class DedupMiddleware
             string modified;
             try
             {
-                modified = Deduplicate(json, config);
+                HashSet<string>? continueWatchingSeries = null;
+                var userKey = GetUserKey(context);
+
+                if (endpoint == EndpointKind.UpNext && userKey is not null)
+                {
+                    continueWatchingSeries = await GetRecentContinueWatchingSeriesAsync(userKey, requestStartedAt);
+                }
+
+                modified = Deduplicate(json, config, continueWatchingSeries);
+
+                if (endpoint == EndpointKind.ContinueWatching && userKey is not null)
+                {
+                    StoreContinueWatchingSeries(userKey, modified);
+                }
             }
             catch (Exception ex)
             {
@@ -166,7 +184,7 @@ public class DedupMiddleware
         return output.ToArray();
     }
 
-    private static bool IsResumeEndpoint(string path)
+    private static EndpointKind GetEndpointKind(string path)
     {
         var trimmed = path.Trim('/');
         var parts = trimmed.Split('/');
@@ -177,7 +195,7 @@ public class DedupMiddleware
             && string.Equals(parts[2], "Items", StringComparison.OrdinalIgnoreCase)
             && string.Equals(parts[3], "Resume", StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            return EndpointKind.ContinueWatching;
         }
 
         // Pattern 2: /UserItems/Resume (SwiftFin iOS, Wholphin Android - SDK-style)
@@ -185,7 +203,7 @@ public class DedupMiddleware
             && string.Equals(parts[0], "UserItems", StringComparison.OrdinalIgnoreCase)
             && string.Equals(parts[1], "Resume", StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            return EndpointKind.ContinueWatching;
         }
 
         // Pattern 3: /Shows/Resume (some clients)
@@ -193,7 +211,7 @@ public class DedupMiddleware
             && string.Equals(parts[0], "Shows", StringComparison.OrdinalIgnoreCase)
             && string.Equals(parts[1], "Resume", StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            return EndpointKind.ContinueWatching;
         }
 
         // Pattern 4: /HomeScreen/Section/ContinueWatching (Home Screen Sections
@@ -204,23 +222,136 @@ public class DedupMiddleware
             && string.Equals(parts[1], "Section", StringComparison.OrdinalIgnoreCase)
             && string.Equals(parts[2], "ContinueWatching", StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            return EndpointKind.ContinueWatching;
         }
 
-        return false;
+        // /Shows/NextUp (standard Jellyfin Up Next endpoint)
+        if (parts.Length == 2
+            && string.Equals(parts[0], "Shows", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(parts[1], "NextUp", StringComparison.OrdinalIgnoreCase))
+        {
+            return EndpointKind.UpNext;
+        }
+
+        // /HomeScreen/Section/NextUp (Home Screen Sections / Jellyfin Enhanced)
+        if (parts.Length == 3
+            && string.Equals(parts[0], "HomeScreen", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(parts[1], "Section", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(parts[2], "NextUp", StringComparison.OrdinalIgnoreCase))
+        {
+            return EndpointKind.UpNext;
+        }
+
+        return EndpointKind.None;
+    }
+
+    private static string? GetUserKey(HttpContext context)
+    {
+        var pathParts = (context.Request.Path.Value ?? string.Empty).Trim('/').Split('/');
+        if (pathParts.Length >= 2
+            && string.Equals(pathParts[0], "Users", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(pathParts[1]))
+        {
+            return pathParts[1];
+        }
+
+        if (context.Request.Query.TryGetValue("UserId", out var userId)
+            && !string.IsNullOrWhiteSpace(userId.ToString()))
+        {
+            return userId.ToString();
+        }
+
+        return context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? context.User.FindFirstValue("sub")
+            ?? context.User.Identity?.Name;
+    }
+
+    private static async Task<HashSet<string>?> GetRecentContinueWatchingSeriesAsync(
+        string userKey,
+        DateTimeOffset requestStartedAt)
+    {
+        ContinueWatchingSnapshot? fallback = null;
+
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            if (ContinueWatchingByUser.TryGetValue(userKey, out var snapshot))
+            {
+                fallback = snapshot;
+
+                // Prefer the Continue Watching response from this page load. A small
+                // tolerance also accepts a response that completed just before Up Next began.
+                if (snapshot.CreatedAt >= requestStartedAt - TimeSpan.FromSeconds(2))
+                {
+                    return GetActiveSeries(snapshot);
+                }
+            }
+
+            await Task.Delay(50);
+        }
+
+        return fallback is null ? null : GetActiveSeries(fallback);
+    }
+
+    private static void StoreContinueWatchingSeries(string userKey, string json)
+    {
+        var items = JsonNode.Parse(json)?["Items"]?.AsArray();
+        if (items is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var seriesIds = items
+            .Select(item => item?["SeriesId"]?.GetValue<string>())
+            .Where(seriesId => !string.IsNullOrWhiteSpace(seriesId))
+            .Select(seriesId => seriesId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        ContinueWatchingByUser.AddOrUpdate(
+            userKey,
+            _ => new ContinueWatchingSnapshot(
+                seriesIds.ToDictionary(id => id, _ => now, StringComparer.OrdinalIgnoreCase),
+                now),
+            (_, previous) =>
+            {
+                // Different Resume requests may contain different subsets. Keep each
+                // recently observed series independently instead of replacing the set.
+                var seenAt = previous.SeriesSeenAt
+                    .Where(entry => now - entry.Value <= SeriesLifetime)
+                    .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var seriesId in seriesIds)
+                {
+                    seenAt[seriesId] = now;
+                }
+
+                return new ContinueWatchingSnapshot(seenAt, now);
+            });
+    }
+
+    private static HashSet<string> GetActiveSeries(ContinueWatchingSnapshot snapshot)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return snapshot.SeriesSeenAt
+            .Where(entry => now - entry.Value <= SeriesLifetime)
+            .Select(entry => entry.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
     /// Parses the response JSON, deduplicates Items by SeriesId,
     /// keeps the most recently played per series, and re-serializes.
     /// </summary>
-    private string Deduplicate(string json, Configuration.PluginConfiguration config)
+    private string Deduplicate(
+        string json,
+        Configuration.PluginConfiguration config,
+        HashSet<string>? excludedSeries = null)
     {
         var root = JsonNode.Parse(json);
         if (root is null) return json;
 
         var itemsNode = root["Items"]?.AsArray();
-        if (itemsNode is null || itemsNode.Count < 2) return json;
+        if (itemsNode is null) return json;
 
         // Group items by series (or by item ID if movie/no series)
         var groups = new Dictionary<string, List<(JsonNode node, DateTime lastPlayed)>>();
@@ -233,6 +364,11 @@ public class DedupMiddleware
             var itemType = item["Type"]?.GetValue<string>() ?? string.Empty;
             var seriesId = item["SeriesId"]?.GetValue<string>();
             var lastPlayed = ParseDate(item["UserData"]?["LastPlayedDate"]?.GetValue<string>());
+
+            if (!string.IsNullOrEmpty(seriesId) && excludedSeries?.Contains(seriesId) == true)
+            {
+                continue;
+            }
 
             // Episodes always group by SeriesId
             if (string.Equals(itemType, "Episode", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(seriesId))
@@ -301,7 +437,7 @@ public class DedupMiddleware
         var hidden = itemsNode.Count - newArray.Count;
         if (hidden > 0)
         {
-            _logger.LogDebug("Deduplicated Resume response: {Original} → {Final} ({Hidden} hidden)",
+            _logger.LogDebug("Deduplicated media response: {Original} → {Final} ({Hidden} hidden)",
                 itemsNode.Count, newArray.Count, hidden);
         }
 
@@ -312,5 +448,16 @@ public class DedupMiddleware
     {
         if (string.IsNullOrEmpty(value)) return DateTime.MinValue;
         return DateTime.TryParse(value, out var dt) ? dt : DateTime.MinValue;
+    }
+
+    private sealed record ContinueWatchingSnapshot(
+        Dictionary<string, DateTimeOffset> SeriesSeenAt,
+        DateTimeOffset CreatedAt);
+
+    private enum EndpointKind
+    {
+        None,
+        ContinueWatching,
+        UpNext
     }
 }

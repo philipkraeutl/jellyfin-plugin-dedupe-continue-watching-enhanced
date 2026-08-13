@@ -73,9 +73,14 @@ Jellyfin's native Continue Watching row shows **every episode with partial progr
 
 Find it under **Dashboard → Plugins → Continue Watching Deduplicator**.
 
+Enable **Deduplicate Up Next** to deduplicate the Up Next row and hide series
+that are already present in Continue Watching. This option is disabled by
+default, preserving the existing Continue Watching-only behavior.
+
 | Setting | Default | Description |
 |---|---|---|
 | Enabled | `true` | Master toggle; off = middleware is a no-op |
+| Deduplicate Up Next | `false` | Deduplicate Up Next and hide series already in Continue Watching |
 | Deduplicate Movies | `false` | Also dedupe movies (only useful with multi-version libraries) |
 | Max Episodes per Series | `1` | Keep N most recently played per series |
 
@@ -87,6 +92,8 @@ Middleware registered via `IPluginServiceRegistrator` + `IStartupFilter` interce
 - `/UserItems/Resume` (SwiftFin, Wholphin, Findroid — SDK clients)
 - `/Shows/Resume` (legacy clients)
 - `/HomeScreen/Section/ContinueWatching` (Home Screen Sections plugin / Jellyfin Enhanced)
+- `/Shows/NextUp` (optional; enable **Deduplicate Up Next**)
+- `/HomeScreen/Section/NextUp` (optional; Home Screen Sections / Jellyfin Enhanced)
 
 For each matching 200 response it:
 
