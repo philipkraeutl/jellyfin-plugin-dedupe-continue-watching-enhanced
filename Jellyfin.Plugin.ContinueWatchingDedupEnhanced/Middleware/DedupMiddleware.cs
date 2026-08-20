@@ -101,6 +101,7 @@ public class DedupMiddleware
             try
             {
                 HashSet<string>? continueWatchingSeries = null;
+                HashSet<string>? suppressedContinueWatchingSeries = null;
                 var userKey = GetUserKey(context);
 
                 if (endpoint == EndpointKind.UpNext && userKey is not null)
@@ -108,11 +109,22 @@ public class DedupMiddleware
                     continueWatchingSeries = await GetRecentContinueWatchingSeriesAsync(userKey, requestStartedAt);
                 }
 
-                modified = Deduplicate(json, config, endpoint, userKey, continueWatchingSeries);
+                if (endpoint == EndpointKind.ContinueWatching)
+                {
+                    suppressedContinueWatchingSeries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                modified = Deduplicate(
+                    json,
+                    config,
+                    endpoint,
+                    userKey,
+                    continueWatchingSeries,
+                    suppressedContinueWatchingSeries);
 
                 if (endpoint == EndpointKind.ContinueWatching && userKey is not null)
                 {
-                    StoreContinueWatchingSeries(userKey, modified);
+                    StoreContinueWatchingSeries(userKey, modified, suppressedContinueWatchingSeries);
                 }
             }
             catch (Exception ex)
@@ -294,7 +306,10 @@ public class DedupMiddleware
         return fallback is null ? null : GetActiveSeries(fallback);
     }
 
-    private static void StoreContinueWatchingSeries(string userKey, string json)
+    private static void StoreContinueWatchingSeries(
+        string userKey,
+        string json,
+        HashSet<string>? suppressedSeries)
     {
         var items = JsonNode.Parse(json)?["Items"]?.AsArray();
         if (items is null)
@@ -327,6 +342,17 @@ public class DedupMiddleware
                     seenAt[seriesId] = now;
                 }
 
+                // A stale episode hidden by the episode watermark must not keep
+                // its whole series excluded from Up Next. Removing it here lets
+                // the actual successor appear immediately in that row.
+                if (suppressedSeries is not null)
+                {
+                    foreach (var seriesId in suppressedSeries)
+                    {
+                        seenAt.Remove(seriesId);
+                    }
+                }
+
                 return new ContinueWatchingSnapshot(seenAt, now);
             });
     }
@@ -349,7 +375,8 @@ public class DedupMiddleware
         Configuration.PluginConfiguration config,
         EndpointKind endpoint,
         string? userKey,
-        HashSet<string>? excludedSeries = null)
+        HashSet<string>? excludedSeries = null,
+        HashSet<string>? suppressedSeries = null)
     {
         var root = JsonNode.Parse(json);
         if (root is null) return json;
@@ -432,6 +459,7 @@ public class DedupMiddleware
                 && ordered.Count > 0
                 && ShouldSuppressPreviouslyDeduplicatedEpisode(userKey, group.Key, ordered[0]))
             {
+                suppressedSeries?.Add(group.Key);
                 continue;
             }
 

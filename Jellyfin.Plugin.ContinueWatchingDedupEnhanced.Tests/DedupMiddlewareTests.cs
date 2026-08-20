@@ -95,13 +95,23 @@ public class DedupMiddlewareTests
             """;
 
         var first = JsonNode.Parse(InvokeDeduplicate(firstResponse, "ContinueWatching", user))!;
-        var second = JsonNode.Parse(InvokeDeduplicate(afterEpisodeTenCompleted, "ContinueWatching", user))!;
+        var suppressedSeries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var second = JsonNode.Parse(InvokeDeduplicate(
+            afterEpisodeTenCompleted,
+            "ContinueWatching",
+            user,
+            suppressedSeries))!;
 
         Assert.Equal("episode-10", first["Items"]![0]!["Id"]!.GetValue<string>());
         Assert.Empty(second["Items"]!.AsArray());
+        Assert.Contains("series-1", suppressedSeries);
     }
 
-    private static string InvokeDeduplicate(string json, string endpointName, string? userKey = null)
+    private static string InvokeDeduplicate(
+        string json,
+        string endpointName,
+        string? userKey = null,
+        HashSet<string>? suppressedSeries = null)
     {
         var middleware = new DedupMiddleware(_ => Task.CompletedTask, NullLogger<DedupMiddleware>.Instance);
         var middlewareType = typeof(DedupMiddleware);
@@ -110,6 +120,8 @@ public class DedupMiddlewareTests
         var method = middlewareType.GetMethod("Deduplicate", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var config = new PluginConfiguration { MaxEpisodesPerSeries = 1 };
 
-        return (string)method.Invoke(middleware, new object?[] { json, config, endpoint, userKey, null })!;
+        return (string)method.Invoke(
+            middleware,
+            new object?[] { json, config, endpoint, userKey, null, suppressedSeries })!;
     }
 }
