@@ -1,6 +1,6 @@
 name: "Continue Watching Deduplicator Enhanced"
 guid: "58ee4cec-e3e2-4bbf-bf25-4f34e9e96fbc"
-version: "1.0.0.0"
+version: "1.0.0.1"
 targetAbi: "10.10.0.0"
 framework: "net8.0"
 overview: "Enhanced deduplication for Continue Watching and Up Next"
