@@ -21,6 +21,8 @@ public class DedupMiddleware
 {
     private static readonly ConcurrentDictionary<string, ContinueWatchingSnapshot> ContinueWatchingByUser =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, EpisodeWatermark>> EpisodeWatermarksByUser =
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan SeriesLifetime = TimeSpan.FromMinutes(1);
     private readonly RequestDelegate _next;
     private readonly ILogger<DedupMiddleware> _logger;
@@ -106,7 +108,7 @@ public class DedupMiddleware
                     continueWatchingSeries = await GetRecentContinueWatchingSeriesAsync(userKey, requestStartedAt);
                 }
 
-                modified = Deduplicate(json, config, continueWatchingSeries);
+                modified = Deduplicate(json, config, endpoint, userKey, continueWatchingSeries);
 
                 if (endpoint == EndpointKind.ContinueWatching && userKey is not null)
                 {
@@ -345,6 +347,8 @@ public class DedupMiddleware
     private string Deduplicate(
         string json,
         Configuration.PluginConfiguration config,
+        EndpointKind endpoint,
+        string? userKey,
         HashSet<string>? excludedSeries = null)
     {
         var root = JsonNode.Parse(json);
@@ -354,7 +358,7 @@ public class DedupMiddleware
         if (itemsNode is null) return json;
 
         // Group items by series (or by item ID if movie/no series)
-        var groups = new Dictionary<string, List<(JsonNode node, DateTime lastPlayed)>>();
+        var groups = new Dictionary<string, List<(JsonNode node, DateTime lastPlayed, int season, int episode)>>();
         var passthrough = new List<JsonNode>();
 
         foreach (var item in itemsNode)
@@ -364,6 +368,8 @@ public class DedupMiddleware
             var itemType = item["Type"]?.GetValue<string>() ?? string.Empty;
             var seriesId = item["SeriesId"]?.GetValue<string>();
             var lastPlayed = ParseDate(item["UserData"]?["LastPlayedDate"]?.GetValue<string>());
+            var season = ParseIndex(item["ParentIndexNumber"]);
+            var episode = ParseIndex(item["IndexNumber"]);
 
             if (!string.IsNullOrEmpty(seriesId) && excludedSeries?.Contains(seriesId) == true)
             {
@@ -375,10 +381,10 @@ public class DedupMiddleware
             {
                 if (!groups.TryGetValue(seriesId, out var list))
                 {
-                    list = new List<(JsonNode, DateTime)>();
+                    list = new List<(JsonNode, DateTime, int, int)>();
                     groups[seriesId] = list;
                 }
-                list.Add((item, lastPlayed));
+                list.Add((item, lastPlayed, season, episode));
                 continue;
             }
 
@@ -388,10 +394,10 @@ public class DedupMiddleware
                 var movieKey = $"movie:{item["Id"]?.GetValue<string>()}";
                 if (!groups.TryGetValue(movieKey, out var list))
                 {
-                    list = new List<(JsonNode, DateTime)>();
+                    list = new List<(JsonNode, DateTime, int, int)>();
                     groups[movieKey] = list;
                 }
-                list.Add((item, lastPlayed));
+                list.Add((item, lastPlayed, season, episode));
                 continue;
             }
 
@@ -399,18 +405,37 @@ public class DedupMiddleware
             passthrough.Add(item);
         }
 
-        // For each group, keep the top N items by LastPlayedDate
+        // Resume entries represent playback progress, so LastPlayedDate is the
+        // correct signal. Next Up entries are usually unplayed and have no such
+        // date; sorting them by LastPlayedDate would make an older, previously
+        // started episode beat the actual next episode. For Next Up, prefer the
+        // furthest episode in the series chronology instead.
         var keep = new List<JsonNode>();
         keep.AddRange(passthrough);
 
         var maxPerSeries = Math.Max(1, config.MaxEpisodesPerSeries);
-        foreach (var entry in groups.Values)
+        foreach (var group in groups)
         {
-            var ordered = entry
-                .OrderByDescending(t => t.lastPlayed)
+            var ordered = (endpoint == EndpointKind.UpNext
+                    ? group.Value.OrderByDescending(t => t.season)
+                        .ThenByDescending(t => t.episode)
+                        .ThenByDescending(t => t.lastPlayed)
+                    : group.Value.OrderByDescending(t => t.lastPlayed)
+                        .ThenByDescending(t => t.season)
+                        .ThenByDescending(t => t.episode))
                 .Take(maxPerSeries)
-                .Select(t => t.node);
-            keep.AddRange(ordered);
+                .ToList();
+
+            if (endpoint == EndpointKind.ContinueWatching
+                && userKey is not null
+                && !group.Key.StartsWith("movie:", StringComparison.Ordinal)
+                && ordered.Count > 0
+                && ShouldSuppressPreviouslyDeduplicatedEpisode(userKey, group.Key, ordered[0]))
+            {
+                continue;
+            }
+
+            keep.AddRange(ordered.Select(t => t.node));
         }
 
         // Preserve original ordering (by index in the input)
@@ -450,9 +475,56 @@ public class DedupMiddleware
         return DateTime.TryParse(value, out var dt) ? dt : DateTime.MinValue;
     }
 
+    private static int ParseIndex(JsonNode? value)
+    {
+        return value is JsonValue jsonValue && jsonValue.TryGetValue<int>(out var index)
+            ? index
+            : int.MinValue;
+    }
+
+    private static bool ShouldSuppressPreviouslyDeduplicatedEpisode(
+        string userKey,
+        string seriesId,
+        (JsonNode node, DateTime lastPlayed, int season, int episode) candidate)
+    {
+        var watermarks = EpisodeWatermarksByUser.GetOrAdd(
+            userKey,
+            _ => new ConcurrentDictionary<string, EpisodeWatermark>(StringComparer.OrdinalIgnoreCase));
+
+        if (watermarks.TryGetValue(seriesId, out var previous))
+        {
+            var isEarlier = candidate.season < previous.Season
+                || (candidate.season == previous.Season && candidate.episode < previous.Episode);
+
+            // A genuinely newer playback means the user intentionally returned
+            // to the older episode. Otherwise it is stale progress that was
+            // already hidden by a later episode and must stay hidden.
+            if (isEarlier && candidate.lastPlayed <= previous.LastPlayed)
+            {
+                return true;
+            }
+        }
+
+        watermarks.AddOrUpdate(
+            seriesId,
+            _ => new EpisodeWatermark(candidate.season, candidate.episode, candidate.lastPlayed),
+            (_, current) => IsLater(candidate.season, candidate.episode, current)
+                ? new EpisodeWatermark(candidate.season, candidate.episode, candidate.lastPlayed)
+                : current);
+
+        return false;
+    }
+
+    private static bool IsLater(int season, int episode, EpisodeWatermark current)
+    {
+        return season > current.Season || (season == current.Season && episode > current.Episode);
+    }
+
     private sealed record ContinueWatchingSnapshot(
         Dictionary<string, DateTimeOffset> SeriesSeenAt,
         DateTimeOffset CreatedAt);
+
+    private sealed record EpisodeWatermark(int Season, int Episode, DateTime LastPlayed);
 
     private enum EndpointKind
     {
