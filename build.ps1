@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 $PluginName = "Jellyfin.Plugin.ContinueWatchingDedupEnhanced"
-$Version = "1.0.0.1"
+$Version = "1.0.0.2"
 Write-Host "Building $PluginName v$Version..." -ForegroundColor Cyan
 
 # Clean previous builds

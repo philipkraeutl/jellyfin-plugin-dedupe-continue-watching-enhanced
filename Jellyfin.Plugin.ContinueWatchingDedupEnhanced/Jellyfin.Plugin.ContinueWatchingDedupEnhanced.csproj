@@ -5,7 +5,7 @@
     <TargetFramework>$(JellyfinTargetFramework)</TargetFramework>
     <RootNamespace>Jellyfin.Plugin.ContinueWatchingDedupEnhanced</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.ContinueWatchingDedupEnhanced</AssemblyName>
-    <PluginVersion Condition="'$(PluginVersion)' == ''">1.0.0.1</PluginVersion>
+    <PluginVersion Condition="'$(PluginVersion)' == ''">1.0.0.2</PluginVersion>
     <AssemblyVersion>$(PluginVersion)</AssemblyVersion>
     <FileVersion>$(PluginVersion)</FileVersion>
     <Version>$(PluginVersion)</Version>
