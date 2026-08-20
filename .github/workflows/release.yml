@@ -47,14 +47,27 @@ jobs:
           if ($version -notmatch '^\d+\.\d+\.\d+\.\d+$') {
               throw "Release version '$version' must contain four numeric parts."
           }
-          $buildVersion = (Select-String -Path build.yaml -Pattern '^version:\s*"?([^"\s]+)"?\s*$').Matches.Groups[1].Value
-          [xml]$project = Get-Content Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj
-          $projectVersion = $project.SelectSingleNode('//PluginVersion').InnerText
-          if ($version -ne $buildVersion -or $version -ne $projectVersion) {
-              throw "Version mismatch: release=$version, build.yaml=$buildVersion, PluginVersion=$projectVersion"
-          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Synchronize version metadata
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $version = $env:RELEASE_VERSION
+          $build = Get-Content build.yaml -Raw
+          $build = $build -replace '(?m)^version:\s*"?[^\r\n"]+"?\s*$', "version: `"$version`""
+          Set-Content build.yaml $build -Encoding utf8 -NoNewline
+
+          $projectPath = 'Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj'
+          $project = Get-Content $projectPath -Raw
+          $project = $project -replace '<PluginVersion Condition="''\$\(PluginVersion\)'' == ''''">[^<]+</PluginVersion>', "<PluginVersion Condition=`"'`$(PluginVersion)' == ''`">$version</PluginVersion>"
+          Set-Content $projectPath $project -Encoding utf8 -NoNewline
+
+          $buildScript = Get-Content build.ps1 -Raw
+          $buildScript = $buildScript -replace '(?m)^\$Version\s*=\s*"[^"]+"\s*$', "`$Version = `"$version`""
+          Set-Content build.ps1 $buildScript -Encoding utf8 -NoNewline
 
       - name: Package Jellyfin 10.10 build
         shell: pwsh
@@ -135,13 +148,19 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           cp manifest.json "$RUNNER_TEMP/manifest.json"
+          cp build.yaml "$RUNNER_TEMP/build.yaml"
+          cp build.ps1 "$RUNNER_TEMP/build.ps1"
+          cp Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj "$RUNNER_TEMP/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj"
           git fetch origin "$DEFAULT_BRANCH"
           git checkout -B "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH"
           cp "$RUNNER_TEMP/manifest.json" manifest.json
-          if ! git diff --quiet -- manifest.json; then
+          cp "$RUNNER_TEMP/build.yaml" build.yaml
+          cp "$RUNNER_TEMP/build.ps1" build.ps1
+          cp "$RUNNER_TEMP/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj" Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj
+          if ! git diff --quiet -- manifest.json build.yaml build.ps1 Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add manifest.json
-            git commit -m "Update plugin manifest for v${RELEASE_VERSION}"
+            git add manifest.json build.yaml build.ps1 Jellyfin.Plugin.ContinueWatchingDedupEnhanced/Jellyfin.Plugin.ContinueWatchingDedupEnhanced.csproj
+            git commit -m "Update release metadata for v${RELEASE_VERSION}"
             git push origin "HEAD:${DEFAULT_BRANCH}"
           fi
